@@ -73,7 +73,7 @@ jobs:
           PY
       - name: Create immutable release draft and upload verified files
         run: |
-          gh release create v2.4.0 --draft --title "Chaux Agent 2.4.0" --notes "Two ranking mechanics and spelling/picture quiz briefs. Saved channel commentary voices with personality, tone, delivery and seed. Workspace MCP preset creation and audition tools. Actual auditions require the optional Qwen runtime; quiz media preparation remains local. Unsigned Windows publisher: Unknown."
+          gh release create v2.4.0 --draft --title "Chaux Agent 2.4.0" --notes "Empty quiz briefs now let AI create projects, choose original questions, discover licensed photos and prepare bundled local Kokoro narration automatically. Channel watermarks persist. New rankings select the current renderer; personality ranking and saved channel voice settings remain available. Qwen commentary synthesis requires the optional runtime. Unsigned Windows publisher: Unknown."
           gh release upload v2.4.0 artifacts/chaux-agent-windows-v2.4.0.exe artifacts/chaux-agent-windows-v2.4.0-setup.exe artifacts/release-manifest.json
       - name: Independently download and compare every uploaded file
         run: |
