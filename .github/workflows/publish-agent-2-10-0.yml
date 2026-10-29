@@ -1,0 +1,111 @@
+name: Publish verified Agent 2.10.0
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_sha256:
+        description: SHA256 of the release manifest downloaded from the qualified private CI draft
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: danish-fareed/chaux-ai-agent-releases
+      MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Download, authenticate and inspect the tested artifact
+        run: |
+          test "$(gh release view v2.10.0 --json isDraft --jq .isDraft)" = true
+          gh release download v2.10.0 --dir artifacts
+          python -m pip install pyinstaller==6.22.3 --quiet
+          python - <<'PY'
+          import hashlib, json, os, shutil, types, urllib.parse, urllib.request, zipfile
+          from pathlib import Path
+          from PyInstaller.archive.readers import CArchiveReader
+          def digest(path):
+              with open(path,'rb') as source: return hashlib.file_digest(source,'sha256').hexdigest()
+          assert os.environ['MANIFEST_SHA256'] == 'd57fce919025e6b462612473657bb22fd739d2d5c4978b70b905341d843f8b7f'
+          assert digest('artifacts/release-manifest.json') == os.environ['MANIFEST_SHA256']
+          manifest = json.loads(Path('artifacts/release-manifest.json').read_text('utf-8-sig'))
+          expected = {manifest[k]['file']:manifest[k]['sha256'] for k in ('installer','standalone')}
+          assert set(expected) == {'chaux-agent-windows-v2.10.0.exe','chaux-agent-windows-v2.10.0-setup.exe'}
+          for name, sha in expected.items(): assert digest(Path('artifacts')/name) == sha
+          assert manifest['schema_version'] == 2 and manifest['agent_version'] == '2.10.0' and manifest['channel'] == 'stable'
+          assert manifest['installer']['file'] == 'chaux-agent-windows-v2.10.0-setup.exe'
+          assert manifest['installer']['sha256'] == expected[manifest['installer']['file']]
+          assert manifest['installer']['size'] == Path('artifacts',manifest['installer']['file']).stat().st_size
+          assert manifest['installer']['url'] == 'https://github.com/danish-fareed/chaux-ai-agent-releases/releases/download/v2.10.0/chaux-agent-windows-v2.10.0-setup.exe'
+          assert manifest['standalone']['sha256'] == expected[manifest['standalone']['file']]
+          assert manifest['authenticode']['required'] is False
+          assert manifest['authenticode']['publisher'] == manifest['authenticode']['status'] == 'Unknown'
+          assert manifest['minimum_supported_version'] == '1.12.1'
+          config = json.loads(CArchiveReader('artifacts/chaux-agent-windows-v2.10.0.exe').extract('chaux-release.json'))
+          assert config['app_origin'] == 'https://chaux.jangoo.org' and config['release_channel'] == 'stable'
+          assert config['update_manifest_url'] == 'https://chaux.jangoo.org/agent-downloads/update-manifest.json'
+          assert config['beta_update_manifest_url'] == 'https://chaux.jangoo.org/agent-downloads/update-manifest-beta.json'
+          assert config['previous_version'] == '2.9.1'
+          assert config['previous_installer_sha256'] == '49c4736ba729db3e310b4adba8e653c8055dcd012dea8edc0f04ccab4482f0d4'
+          expected_code = {'desktop': '17cbec47daa3af552b878a861ac6380ac956dd6dff897775febfb2900adbb854', 'diagnostics': '4f420b2a4419b24cd6486eed4055aa31cd0c4fcfc7b1df97dfea4dc4bb0ec00d', 'main': '2e2b5a142e03dc776b07c94ca37102aa85972b59f6b0852a23b169af3960b621', 'remote_mcp': 'f2859a06ed4df5425a0cebed7df88e1211b33e72526010b9656f42ebf043dc51', 'subprocess_utils': '4328fdc744dce12f867667fe293729f7e835e5fccb2eba7ccd65270dd2534492', 'updater': '437271098835e17603848d5f182e7344f7408b53cbc952256b012f1ddf77f5b3', 'video_studio': 'ec0f742f8c23a5872bda7b5cb52d72d746a89c7131c5becd6f09467eac5662cc', 'lifecycle': '06252190c1bf51377c41c40b0f20d581b1f5c8365a0418a3bf1506d0d80f519b', 'source_discovery': '07535ec6d9aae0fdbd37f103caec807a9a6413cefa9650f05a601b338e448449', 'source_errors': '7b58846a35a7168c88309b6ab82134e362a241d8d903b638ebf1a9b42aa68f1d', 'source_inspection': '1ad21570cc402e40b3c10c9a98ad3867fbf6dfc090b4f8931e14c3db80ca5fd9', 'video_studio_api': '674e2e4540bedb05d54a86e62aaf52a65ea5ed6558654e04113590f20bc4ec30', 'generation': '2a7d748462c2f49fa40856f5a6a3c6e35967efb45cbd12c99e0ae62a1c6dc2a8', 'generation_api': '3530b6771c6cad4cc14200e341a108433f51cdccfb6d5d1f539eea5e531de931', 'generation_browser': '08b7e87eb2901ab5a4fb4a0ec4a29c213663dcadeba7e6c7396c3fb262952f76', 'generation_launch': 'ce1caa051639436749d4e2081e2323d861656914fc72706feb433d693a0f8a03', 'generation_models': 'df495d1eff237b586bf9ffdc0ad89395f3b2223d01589e63784d8ac8dab88662', 'generation_provider': 'a1dadd0820164d793e8f2fdaeb8955697114cf300bdc9e03f606a85b3affddac', 'generation_worker': '09493e7bb7dc93b4e1648becee8a2744e46705822dca4f29f1e8e209c5664142'}
+          def normalize(value):
+              if isinstance(value,types.CodeType):
+                  return (value.co_code.hex(),value.co_names,value.co_varnames,value.co_flags,tuple(normalize(c) for c in value.co_consts))
+              if isinstance(value,tuple):return tuple(normalize(v) for v in value)
+              if isinstance(value,frozenset):return ('frozenset',tuple(sorted((normalize(v) for v in value),key=repr)))
+              if isinstance(value,bytes):return ('bytes',value.hex())
+              return value
+          reader=CArchiveReader('artifacts/chaux-agent-windows-v2.10.0.exe').open_embedded_archive('PYZ.pyz')
+          for name,expected in expected_code.items():
+              actual=hashlib.sha256(repr(normalize(reader.extract('clip_agent.'+name))).encode('utf-8')).hexdigest()
+              assert actual==expected, ('Frozen source differs',name)
+          print('Verified all 19 frozen modules against qualified generation source 378cdae')
+          print(json.dumps({'verified_archive':True,'verified_config':True,'installer':manifest['installer'],'standalone':manifest['standalone']}))
+          PY
+      - name: Independently download and compare every uploaded file
+        run: |
+          gh release download v2.10.0 --dir verification
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          for path in Path('artifacts').iterdir():
+              other = Path('verification')/path.name
+              assert path.stat().st_size == other.stat().st_size
+              with path.open('rb') as source, other.open('rb') as downloaded:
+                  assert hashlib.file_digest(source,'sha256').digest() == hashlib.file_digest(downloaded,'sha256').digest()
+              print('Independently verified:', path.name, path.stat().st_size)
+          PY
+      - name: Publish latest and verify anonymous HTTPS delivery
+        run: |
+          gh release view v2.10.0 --json body > release-notes.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          body=json.loads(Path('release-notes.json').read_text())['body']
+          Path('release-notes.md').write_text('\n'.join(line for line in body.splitlines() if not line.startswith('Example board:'))+'\n')
+          PY
+          gh release edit v2.10.0 --notes-file release-notes.md --draft=false --latest
+          python - <<'PY'
+          import hashlib, json, urllib.request
+          from pathlib import Path
+          local = json.loads(Path('artifacts/release-manifest.json').read_text('utf-8-sig'))
+          public = json.load(urllib.request.urlopen('https://github.com/danish-fareed/chaux-ai-agent-releases/releases/download/v2.10.0/release-manifest.json'))
+          assert local == public
+          request = urllib.request.Request(local['installer']['url'], method='HEAD')
+          with urllib.request.urlopen(request) as response:
+              assert response.status == 200
+              assert int(response.headers['Content-Length']) == local['installer']['size']
+          base='https://github.com/danish-fareed/chaux-ai-agent-releases/releases/download/v2.10.0/'
+          for name in [local['installer']['file'],local['standalone']['file']]:
+              with urllib.request.urlopen(base+name,timeout=60) as source,open('public-'+name,'wb') as output:
+                  while chunk:=source.read(8*1024*1024):output.write(chunk)
+              with open('public-'+name,'rb') as source,open(Path('artifacts')/name,'rb') as expected:
+                  assert hashlib.file_digest(source,'sha256').digest()==hashlib.file_digest(expected,'sha256').digest()
+              print('Anonymous public bytes verified:',name)
+          print('Latest public release and anonymous installer download verified.')
+          PY
